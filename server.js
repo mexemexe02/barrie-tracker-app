@@ -15,7 +15,7 @@ const STATE_PATH = path.join(DATA_DIR, 'tracker-state.json');
 const ADMIN_TOKEN = envValue('ADMIN_TOKEN');
 const LEADS_CSV_URL = envValue('LEADS_CSV_URL', 'https://mexemexe02.github.io/barrie-lead-tracker/leads.csv');
 
-const STATUS_VALUES = new Set(['new', 'sent', 'pending', 'replied', 'dead', 'live', 'in_progress']);
+const STATUS_VALUES = new Set(['new', 'ready', 'sent', 'pending', 'replied', 'dead', 'live', 'in_progress']);
 const WEBSITE_STATUS_VALUES = new Set(['needs_verify', 'no_website', 'has_website', 'unclear']);
 const PHONE_STATUS_VALUES = new Set(['unverified', 'verified', 'wrong', 'duplicate']);
 const EMAIL_STATUS_VALUES = new Set(['missing', 'found', 'unverified', 'bounced']);
@@ -281,6 +281,7 @@ const page = `<!doctype html>
     .url { color: #70a7ff; word-break: break-all; }
     .tiny { color: #777; font-size: 0.72rem; }
     .status-new { color: #4ade80; }
+    .status-ready { color: #facc15; }
     .status-sent { color: #60a5fa; }
     .status-dead { color: #ef7777; }
     .status-pending { color: #fbbf24; }
@@ -306,6 +307,7 @@ const page = `<!doctype html>
     <select id="statusFilter">
       <option value="">All statuses</option>
       <option value="new">new</option>
+      <option value="ready">ready</option>
       <option value="sent">sent</option>
       <option value="dead">dead</option>
       <option value="pending">pending</option>
@@ -323,6 +325,7 @@ const page = `<!doctype html>
   <div id="message" class="message"></div>
   <div class="view-buttons" id="viewButtons">
     <button type="button" data-view="">All</button>
+    <button type="button" data-view="ready-outreach">Ready Outreach</button>
     <button type="button" data-view="ready-text">Ready to Text</button>
     <button type="button" data-view="ready-email">Ready to Email</button>
     <button type="button" data-view="needs-website">Needs Website Verify</button>
@@ -379,6 +382,12 @@ const page = `<!doctype html>
     function hasEmail(lead) {
       return Boolean(clean(lead.email));
     }
+    function hasSocial(lead) {
+      return Boolean(clean(lead.social));
+    }
+    function isOpenForOutreach(lead) {
+      return !['dead', 'sent', 'replied', 'in_progress'].includes(lead.status);
+    }
     function inferredWebsiteStatus(lead) {
       if (lead.website_status) return lead.website_status;
       const notes = String(lead.notes || '').toLowerCase();
@@ -395,9 +404,16 @@ const page = `<!doctype html>
     function inferredOwnerStatus(lead) {
       return lead.owner_status || (clean(lead.contact_name) ? 'found' : 'missing');
     }
+    function outreachAction(lead) {
+      if (hasEmail(lead)) return 'send_email';
+      if (inferredPhoneStatus(lead) === 'verified' && hasPhone(lead)) return 'send_sms';
+      if (hasSocial(lead)) return 'send_social';
+      return 'research_contact';
+    }
     function inferredNextAction(lead) {
       if (lead.next_action) return lead.next_action;
       if (lead.status === 'dead') return 'do_not_contact';
+      if (lead.status === 'ready') return outreachAction(lead);
       if (inferredWebsiteStatus(lead) !== 'no_website') return 'verify_website';
       if (inferredPhoneStatus(lead) !== 'verified') return 'verify_phone';
       if (!hasDemo(lead)) return 'build_demo';
@@ -405,10 +421,14 @@ const page = `<!doctype html>
       return hasPhone(lead) ? 'send_sms' : 'research_contact';
     }
     function readyToText(lead) {
-      return lead.status !== 'dead' && inferredWebsiteStatus(lead) === 'no_website' && inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && hasDemo(lead);
+      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && hasDemo(lead);
     }
     function readyToEmail(lead) {
-      return lead.status !== 'dead' && inferredWebsiteStatus(lead) === 'no_website' && hasEmail(lead) && hasDemo(lead);
+      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && inferredEmailStatus(lead) !== 'bounced' && hasEmail(lead) && hasDemo(lead);
+    }
+    function readyToReachOut(lead) {
+      if (lead.status === 'ready') return true;
+      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && hasDemo(lead) && (readyToText(lead) || readyToEmail(lead) || hasSocial(lead));
     }
     function needsFollowUp(lead) {
       return lead.status === 'sent' || inferredNextAction(lead) === 'follow_up';
@@ -521,6 +541,7 @@ const page = `<!doctype html>
         if (contact === 'missing-email' && clean(lead.email)) return false;
         if (contact === 'has-email' && !clean(lead.email)) return false;
         if (contact === 'phone-only' && (!clean(lead.phone) || clean(lead.email))) return false;
+        if (activeView === 'ready-outreach' && !readyToReachOut(lead)) return false;
         if (activeView === 'ready-text' && !readyToText(lead)) return false;
         if (activeView === 'ready-email' && !readyToEmail(lead)) return false;
         if (activeView === 'needs-website' && inferredWebsiteStatus(lead) === 'no_website') return false;
@@ -543,6 +564,7 @@ const page = `<!doctype html>
       document.getElementById('stats').innerHTML = [
         ['Shown', rows.length],
         ['New', counts.new || 0],
+        ['Ready Outreach', rows.filter(readyToReachOut).length],
         ['Sent', counts.sent || 0],
         ['Dead', counts.dead || 0],
         ['Ready Text', rows.filter(readyToText).length],
@@ -575,7 +597,7 @@ const page = `<!doctype html>
           '<td><strong>' + esc(lead.business) + '</strong><div class="tiny">Base: ' + esc(lead.base_status) + '</div></td>' +
           '<td><span class="score">' + qualityScore(lead) + '</span></td>' +
           '<td><select class="status status-' + esc(lead.status) + '" data-field="status">' +
-            ['new','sent','pending','replied','dead','live','in_progress'].map((s) => '<option value="' + s + '"' + (lead.status === s ? ' selected' : '') + '>' + s + '</option>').join('') +
+            ['new','ready','sent','pending','replied','dead','live','in_progress'].map((s) => '<option value="' + s + '"' + (lead.status === s ? ' selected' : '') + '>' + s + '</option>').join('') +
           '</select></td>' +
           '<td><select data-field="website_status">' + ['needs_verify','no_website','unclear','has_website'].map((s) => '<option value="' + s + '"' + (websiteStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="wide-input" data-field="website_evidence" value="' + esc(clean(lead.website_evidence)) + '" placeholder="website proof / URL"></td>' +
           '<td><select data-field="phone_status">' + ['unverified','verified','wrong','duplicate'].map((s) => '<option value="' + s + '"' + (phoneStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="phone_source" value="' + esc(clean(lead.phone_source)) + '" placeholder="phone source"></td>' +
@@ -585,7 +607,7 @@ const page = `<!doctype html>
           '<td><input class="cell-input" data-field="social" value="' + esc(social) + '" placeholder="social URL"></td>' +
           '<td>' + esc(lead.category) + '</td>' +
           '<td>' + (demo ? '<a class="url" href="' + esc(demo) + '" target="_blank" rel="noopener">demo</a>' : 'TBD') + '</td>' +
-          '<td><select data-field="next_action">' + ['research_contact','verify_website','verify_phone','build_demo','send_sms','send_email','follow_up','do_not_contact'].map((s) => '<option value="' + s + '"' + (nextAction === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
+          '<td><select data-field="next_action">' + ['research_contact','verify_website','verify_phone','build_demo','send_sms','send_email','send_social','follow_up','do_not_contact'].map((s) => '<option value="' + s + '"' + (nextAction === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
           '<td><input type="date" data-field="follow_up_date" value="' + esc(clean(lead.follow_up_date)) + '"><br><input type="date" data-field="last_verified" value="' + esc(clean(lead.last_verified)) + '" title="Last verified"></td>' +
           '<td>' + researchLinks(lead) + '</td>' +
           '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea><br><input class="wide-input" data-field="dead_reason" value="' + esc(clean(lead.dead_reason)) + '" placeholder="dead reason if applicable"></td>' +
@@ -594,6 +616,7 @@ const page = `<!doctype html>
             (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Copy Email</button> ' : '') +
             (clean(lead.phone) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">Mark SMS Sent</button> ' : '') +
             (clean(lead.email) && demo ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Mark Email Sent</button> ' : '') +
+            (demo && isOpenForOutreach(lead) ? '<button class="save-btn" data-action="ready" data-key="' + esc(lead.key) + '">Mark Ready</button> ' : '') +
             '<button class="quick-replied" data-action="replied" data-key="' + esc(lead.key) + '">Replied</button> ' +
             '<button class="quick-dead" data-action="dead" data-key="' + esc(lead.key) + '">Dead</button> ' +
             '<button class="save-btn" data-save="' + esc(lead.key) + '">Save</button>' +
@@ -640,6 +663,13 @@ const page = `<!doctype html>
       }
       if (action === 'replied') {
         Object.assign(payload, { status: 'replied', next_action: 'follow_up' });
+      }
+      if (action === 'ready') {
+        Object.assign(payload, {
+          status: 'ready',
+          next_action: outreachAction(lead),
+          notes: (clean(lead.notes) || '') + '\\nMarked ready for outreach on ' + todayIso() + '.',
+        });
       }
       if (action === 'dead') {
         const reason = prompt('Why is this lead dead? If they have a website, paste the website/domain.');
