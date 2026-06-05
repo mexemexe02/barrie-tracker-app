@@ -476,18 +476,22 @@ const page = `<!doctype html>
     }
     function firstName(name) {
       const cleanName = String(name || '').replace(/&amp;|&/g, 'and').trim();
-      return cleanName.split(/\\s+/)[0] || 'there';
+      return cleanName.split(/\\s+/)[0] || '';
+    }
+    function greeting(name) {
+      const namePart = firstName(name);
+      return namePart ? 'Hi ' + namePart + ',' : 'Hi,';
     }
     function shortUrl(url) {
       return String(url || '').replace(/^https?:\\/\\//, '').replace(/\\/$/, '');
     }
     function smsTemplate(lead) {
       const demo = clean(lead.demo_url);
-      return 'Hi ' + firstName(lead.contact_name || lead.business) + "! I'm Humberto. I run Kumon Mapleview here in Barrie, and I also build websites for local businesses. I noticed " + lead.business + " does not have a website yet, so I put together a quick demo: " + shortUrl(demo) + ". If you are interested, I can build you a proper professional site. Worth a look?";
+      return greeting(lead.contact_name) + " I'm Humberto. I run Kumon Mapleview here in Barrie, and I also build websites for local businesses. I noticed " + lead.business + " does not have a website yet, so I put together a quick demo: " + shortUrl(demo) + ". If you are interested, I can build you a proper professional site. Worth a look?";
     }
     function emailTemplate(lead) {
       const demo = clean(lead.demo_url);
-      return 'Subject: Website demo for ' + lead.business + '\\n\\nHi ' + firstName(lead.contact_name) + ',\\n\\nMy name is Humberto. I run the Kumon Math & Reading Centre on Mapleview, and I also build websites for local Barrie businesses.\\n\\nI noticed ' + lead.business + ' does not have a website yet, so I put together a quick professional demo to show what an online presence could look like:\\n' + demo + '\\n\\nIf you are interested, I can build you a proper professional site. Worth a look?\\n\\nBest,\\nHumberto Domingues\\nhumbertobizes@gmail.com';
+      return 'Subject: Website demo for ' + lead.business + '\\n\\n' + greeting(lead.contact_name) + '\\n\\nMy name is Humberto. I run the Kumon Math & Reading Centre on Mapleview, and I also build websites for local Barrie businesses.\\n\\nI noticed ' + lead.business + ' does not have a website yet, so I put together a quick professional demo to show what an online presence could look like:\\n' + demo + '\\n\\nIf you are interested, I can build you a proper professional site. Worth a look?\\n\\nBest,\\nHumberto Domingues\\nhumbertobizes@gmail.com';
     }
     function fallbackCopyText(text) {
       const textarea = document.createElement('textarea');
