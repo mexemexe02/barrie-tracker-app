@@ -205,6 +205,9 @@ const page = `<!doctype html>
     input, select, textarea, button { border: 1px solid #2a2d3a; border-radius: 6px; background: #161923; color: #eee; padding: 7px 9px; }
     button { cursor: pointer; background: #2a2413; color: #e4c66f; font-weight: 700; }
     button:hover { filter: brightness(1.15); }
+    .copy-sms { background: #17314f; color: #8fc5ff; }
+    .copy-email { background: #321d54; color: #d5b2ff; }
+    .save-btn { background: #2a2413; color: #e4c66f; }
     .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
     .stat { background: #1a1d2a; border-radius: 8px; padding: 10px 14px; min-width: 110px; }
     .stat strong { color: #c9a84c; display: block; font-size: 1.25rem; }
@@ -282,6 +285,25 @@ const page = `<!doctype html>
     function esc(value) {
       return String(value || '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     }
+    function firstName(name) {
+      const cleanName = String(name || '').replace(/&amp;|&/g, 'and').trim();
+      return cleanName.split(/\\s+/)[0] || 'there';
+    }
+    function shortUrl(url) {
+      return String(url || '').replace(/^https?:\\/\\//, '').replace(/\\/$/, '');
+    }
+    function smsTemplate(lead) {
+      const demo = clean(lead.demo_url);
+      return 'Hi ' + firstName(lead.contact_name || lead.business) + "! I'm Humberto, a local Barrie business owner (Kumon Mapleview). I noticed " + lead.business + " does not have a website yet. I put together a quick demo: " + shortUrl(demo) + ". If you are interested, I can build you a proper professional site. No pressure. Worth a look?";
+    }
+    function emailTemplate(lead) {
+      const demo = clean(lead.demo_url);
+      return 'Subject: Website demo for ' + lead.business + '\\n\\nHi ' + firstName(lead.contact_name) + ',\\n\\nMy name is Humberto. I run the Kumon Math & Reading Centre on Mapleview and also build websites for local Barrie businesses.\\n\\nI noticed ' + lead.business + ' does not have a website yet, so I put together a quick professional demo to show what an online presence could look like:\\n' + demo + '\\n\\nIf you are interested, I can build you a proper professional site. No pressure. Worth a look?\\n\\nBest,\\nHumberto Domingues\\nhumbertobizes@gmail.com';
+    }
+    async function copyText(text, label) {
+      await navigator.clipboard.writeText(text);
+      showToast(label + ' copied');
+    }
     async function api(path, options = {}) {
       const response = await fetch(path, {
         ...options,
@@ -357,7 +379,11 @@ const page = `<!doctype html>
           '<td>' + esc(lead.category) + '</td>' +
           '<td>' + (demo ? '<a class="url" href="' + esc(demo) + '" target="_blank" rel="noopener">demo</a>' : 'TBD') + '</td>' +
           '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea></td>' +
-          '<td><button data-save="' + esc(lead.key) + '">Save</button></td>' +
+          '<td>' +
+            (clean(lead.phone) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">SMS</button> ' : '') +
+            (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Email</button> ' : '') +
+            '<button class="save-btn" data-save="' + esc(lead.key) + '">Save</button>' +
+          '</td>' +
         '</tr>';
       }).join('');
     }
@@ -376,6 +402,11 @@ const page = `<!doctype html>
     document.addEventListener('click', (event) => {
       if (event.target.id === 'reload') load().catch((error) => showToast(error.message));
       if (event.target.dataset.save) saveRow(event.target).catch((error) => showToast(error.message));
+      if (event.target.dataset.copy) {
+        const lead = leads.find((item) => item.key === event.target.dataset.key);
+        const text = event.target.dataset.copy === 'sms' ? smsTemplate(lead) : emailTemplate(lead);
+        copyText(text, event.target.dataset.copy.toUpperCase()).catch((error) => showToast(error.message));
+      }
     });
     document.getElementById('tokenForm').addEventListener('submit', (event) => {
       event.preventDefault();
