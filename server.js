@@ -16,6 +16,10 @@ const ADMIN_TOKEN = envValue('ADMIN_TOKEN');
 const LEADS_CSV_URL = envValue('LEADS_CSV_URL', 'https://mexemexe02.github.io/barrie-lead-tracker/leads.csv');
 
 const STATUS_VALUES = new Set(['new', 'sent', 'pending', 'replied', 'dead', 'live', 'in_progress']);
+const WEBSITE_STATUS_VALUES = new Set(['needs_verify', 'no_website', 'has_website', 'unclear']);
+const PHONE_STATUS_VALUES = new Set(['unverified', 'verified', 'wrong', 'duplicate']);
+const EMAIL_STATUS_VALUES = new Set(['missing', 'found', 'unverified', 'bounced']);
+const OWNER_STATUS_VALUES = new Set(['missing', 'found', 'unclear']);
 
 function businessKey(name) {
   return String(name || 'unknown')
@@ -166,7 +170,26 @@ function upsertOverride(payload) {
   const current = state.overrides[key] || {};
   const next = { ...current };
 
-  ['contact_name', 'email', 'social', 'notes', 'outreach_method', 'outreach_date'].forEach((field) => {
+  [
+    'contact_name',
+    'email',
+    'social',
+    'notes',
+    'outreach_method',
+    'outreach_date',
+    'website_status',
+    'website_evidence',
+    'phone_status',
+    'phone_source',
+    'email_status',
+    'email_source',
+    'owner_status',
+    'owner_source',
+    'next_action',
+    'follow_up_date',
+    'last_verified',
+    'dead_reason',
+  ].forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(payload, field)) {
       next[field] = String(payload[field] || '').trim();
     }
@@ -177,6 +200,38 @@ function upsertOverride(payload) {
       throw new Error(`Invalid status: ${payload.status}`);
     }
     next.status = payload.status;
+  }
+
+  if (next.website_status && !WEBSITE_STATUS_VALUES.has(next.website_status)) {
+    throw new Error(`Invalid website status: ${next.website_status}`);
+  }
+  if (next.phone_status && !PHONE_STATUS_VALUES.has(next.phone_status)) {
+    throw new Error(`Invalid phone status: ${next.phone_status}`);
+  }
+  if (next.email_status && !EMAIL_STATUS_VALUES.has(next.email_status)) {
+    throw new Error(`Invalid email status: ${next.email_status}`);
+  }
+  if (next.owner_status && !OWNER_STATUS_VALUES.has(next.owner_status)) {
+    throw new Error(`Invalid owner status: ${next.owner_status}`);
+  }
+
+  if (next.website_status === 'has_website') {
+    next.status = 'dead';
+    next.next_action = 'do_not_contact';
+  }
+
+  if (next.status === 'sent') {
+    next.outreach_date = next.outreach_date || new Date().toISOString().slice(0, 10);
+    next.outreach_method = next.outreach_method || 'manual';
+    next.next_action = next.next_action || 'follow_up';
+  }
+
+  if (next.status === 'replied') {
+    next.next_action = next.next_action || 'follow_up';
+  }
+
+  if (next.status === 'dead' && !next.dead_reason && !next.website_evidence && !next.notes) {
+    throw new Error('Dead leads need notes, a dead reason, or website evidence.');
   }
 
   next.updated_at = new Date().toISOString();
@@ -201,18 +256,23 @@ const page = `<!doctype html>
     h1 { margin: 0 0 8px; color: #c9a84c; font-size: 1.35rem; }
     p { color: #999; margin: 0 0 18px; }
     .bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    .view-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
     .message { background: #1a1d2a; border: 1px solid #2a2d3a; border-radius: 8px; color: #d7c176; margin-bottom: 14px; padding: 10px 12px; }
     input, select, textarea, button { border: 1px solid #2a2d3a; border-radius: 6px; background: #161923; color: #eee; padding: 7px 9px; }
     button { cursor: pointer; background: #2a2413; color: #e4c66f; font-weight: 700; }
     button:hover { filter: brightness(1.15); }
+    .view-buttons button.active { background: #5c4515; color: #fff1a8; }
     .copy-sms { background: #17314f; color: #8fc5ff; }
     .copy-email { background: #321d54; color: #d5b2ff; }
+    .quick-sent { background: #123a2a; color: #83f0b1; }
+    .quick-dead { background: #431b1b; color: #ff9a9a; }
+    .quick-replied { background: #2d2054; color: #c9b4ff; }
     .save-btn { background: #2a2413; color: #e4c66f; }
     .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
     .stat { background: #1a1d2a; border-radius: 8px; padding: 10px 14px; min-width: 110px; }
     .stat strong { color: #c9a84c; display: block; font-size: 1.25rem; }
     .wrap { overflow-x: auto; border: 1px solid #1f2330; border-radius: 8px; }
-    table { width: 100%; border-collapse: collapse; min-width: 1350px; font-size: 0.82rem; }
+    table { width: 100%; border-collapse: collapse; min-width: 2300px; font-size: 0.82rem; }
     th, td { border-bottom: 1px solid #1f2330; padding: 8px; vertical-align: top; text-align: left; }
     th { color: #c9a84c; background: #171a25; position: sticky; top: 0; }
     .url { color: #70a7ff; word-break: break-all; }
@@ -222,8 +282,12 @@ const page = `<!doctype html>
     .status-dead { color: #ef7777; }
     .status-pending { color: #fbbf24; }
     .status-live { color: #4ade80; }
-    .cell-input { width: 180px; }
-    .notes { width: 260px; min-height: 38px; }
+    .cell-input { width: 150px; }
+    .wide-input { width: 230px; }
+    .notes { width: 280px; min-height: 44px; }
+    .action-stack { display: flex; gap: 4px; flex-wrap: wrap; min-width: 260px; }
+    .research-links a { display: inline-block; color: #70a7ff; margin: 0 6px 4px 0; text-decoration: none; }
+    .score { color: #c9a84c; font-weight: 800; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #15351f; color: #7ee787; padding: 10px 18px; border-radius: 8px; opacity: 0; transition: opacity .2s; }
     .toast.show { opacity: 1; }
   </style>
@@ -253,13 +317,26 @@ const page = `<!doctype html>
     <button id="reload" type="button">Reload</button>
   </form>
   <div id="message" class="message"></div>
+  <div class="view-buttons" id="viewButtons">
+    <button type="button" data-view="">All</button>
+    <button type="button" data-view="ready-text">Ready to Text</button>
+    <button type="button" data-view="ready-email">Ready to Email</button>
+    <button type="button" data-view="needs-website">Needs Website Verify</button>
+    <button type="button" data-view="phone-unverified">Phone Unverified</button>
+    <button type="button" data-view="missing-owner">Missing Owner</button>
+    <button type="button" data-view="missing-email">Missing Email</button>
+    <button type="button" data-view="follow-up">Follow Up</button>
+    <button type="button" data-view="replied">Replied</button>
+    <button type="button" data-view="dead">Dead</button>
+  </div>
   <div id="stats" class="stats"></div>
   <div class="wrap">
     <table>
       <thead>
         <tr>
-          <th>#</th><th>Business</th><th>Status</th><th>Owner / Contact</th><th>Email</th><th>Phone</th>
-          <th>Social</th><th>Category</th><th>Demo URL</th><th>Notes</th><th>Action</th>
+          <th>#</th><th>Business</th><th>Score</th><th>Status</th><th>Website</th><th>Phone Verify</th>
+          <th>Owner</th><th>Email</th><th>Phone</th><th>Social</th><th>Category</th><th>Demo URL</th>
+          <th>Next Action</th><th>Follow Up</th><th>Research</th><th>Notes / Evidence</th><th>Action</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -268,6 +345,7 @@ const page = `<!doctype html>
   <div id="toast" class="toast"></div>
   <script>
     let leads = [];
+    let activeView = '';
     const tokenInput = document.getElementById('token');
     const message = document.getElementById('message');
     tokenInput.value = localStorage.getItem('barrie_admin_token') || '';
@@ -285,6 +363,75 @@ const page = `<!doctype html>
     function esc(value) {
       return String(value || '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     }
+    function todayIso() {
+      return new Date().toISOString().slice(0, 10);
+    }
+    function hasDemo(lead) {
+      return Boolean(clean(lead.demo_url)) && !String(lead.demo_url).includes('TBD');
+    }
+    function hasPhone(lead) {
+      return Boolean(clean(lead.phone));
+    }
+    function hasEmail(lead) {
+      return Boolean(clean(lead.email));
+    }
+    function inferredWebsiteStatus(lead) {
+      if (lead.website_status) return lead.website_status;
+      const notes = String(lead.notes || '').toLowerCase();
+      if (lead.status === 'dead' && (notes.includes('website') || notes.includes('domain'))) return 'has_website';
+      if (notes.includes('verified no website') || notes.includes('no official website')) return 'no_website';
+      return 'needs_verify';
+    }
+    function inferredPhoneStatus(lead) {
+      return lead.phone_status || (hasPhone(lead) ? 'unverified' : 'wrong');
+    }
+    function inferredEmailStatus(lead) {
+      return lead.email_status || (hasEmail(lead) ? 'found' : 'missing');
+    }
+    function inferredOwnerStatus(lead) {
+      return lead.owner_status || (clean(lead.contact_name) ? 'found' : 'missing');
+    }
+    function inferredNextAction(lead) {
+      if (lead.next_action) return lead.next_action;
+      if (lead.status === 'dead') return 'do_not_contact';
+      if (inferredWebsiteStatus(lead) !== 'no_website') return 'verify_website';
+      if (inferredPhoneStatus(lead) !== 'verified') return 'verify_phone';
+      if (!hasDemo(lead)) return 'build_demo';
+      if (lead.status === 'sent' || lead.status === 'replied') return 'follow_up';
+      return hasPhone(lead) ? 'send_sms' : 'research_contact';
+    }
+    function readyToText(lead) {
+      return lead.status !== 'dead' && inferredWebsiteStatus(lead) === 'no_website' && inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && hasDemo(lead);
+    }
+    function readyToEmail(lead) {
+      return lead.status !== 'dead' && inferredWebsiteStatus(lead) === 'no_website' && hasEmail(lead) && hasDemo(lead);
+    }
+    function needsFollowUp(lead) {
+      return lead.status === 'sent' || inferredNextAction(lead) === 'follow_up';
+    }
+    function qualityScore(lead) {
+      let score = 0;
+      if (inferredWebsiteStatus(lead) === 'no_website') score += 35;
+      if (inferredPhoneStatus(lead) === 'verified') score += 25;
+      if (hasDemo(lead)) score += 15;
+      if (hasEmail(lead)) score += 10;
+      if (inferredOwnerStatus(lead) === 'found') score += 10;
+      if (clean(lead.social)) score += 5;
+      if (lead.status === 'dead') return 0;
+      return score;
+    }
+    function researchLinks(lead) {
+      const query = encodeURIComponent((lead.business || '') + ' Barrie');
+      const facebook = encodeURIComponent((lead.business || '') + ' Barrie Facebook');
+      const linkedIn = encodeURIComponent((lead.business || '') + ' owner LinkedIn Barrie');
+      return '<div class="research-links">' +
+        '<a href="https://www.google.com/search?q=' + query + '" target="_blank" rel="noopener">Google</a>' +
+        '<a href="https://www.bing.com/search?q=' + query + '" target="_blank" rel="noopener">Bing</a>' +
+        '<a href="https://www.google.com/search?q=' + facebook + '" target="_blank" rel="noopener">Facebook</a>' +
+        '<a href="https://www.google.com/search?q=' + linkedIn + '" target="_blank" rel="noopener">LinkedIn</a>' +
+        '<a href="https://www.yellowpages.ca/search/si/1/' + query + '" target="_blank" rel="noopener">YP</a>' +
+      '</div>';
+    }
     function firstName(name) {
       const cleanName = String(name || '').replace(/&amp;|&/g, 'and').trim();
       return cleanName.split(/\\s+/)[0] || 'there';
@@ -300,9 +447,38 @@ const page = `<!doctype html>
       const demo = clean(lead.demo_url);
       return 'Subject: Website demo for ' + lead.business + '\\n\\nHi ' + firstName(lead.contact_name) + ',\\n\\nMy name is Humberto. I run the Kumon Math & Reading Centre on Mapleview and also build websites for local Barrie businesses.\\n\\nI noticed ' + lead.business + ' does not have a website yet, so I put together a quick professional demo to show what an online presence could look like:\\n' + demo + '\\n\\nIf you are interested, I can build you a proper professional site. No pressure. Worth a look?\\n\\nBest,\\nHumberto Domingues\\nhumbertobizes@gmail.com';
     }
+    function fallbackCopyText(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (!copied) throw new Error('Browser blocked copy. Press Ctrl+C in the prompt.');
+    }
     async function copyText(text, label) {
-      await navigator.clipboard.writeText(text);
-      showToast(label + ' copied');
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          fallbackCopyText(text);
+        }
+        showToast(label + ' copied');
+      } catch (error) {
+        try {
+          fallbackCopyText(text);
+          showToast(label + ' copied');
+        } catch (fallbackError) {
+          window.prompt('Copy this ' + label + ' message:', text);
+          showToast('Copy prompt opened');
+        }
+      }
     }
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -341,6 +517,15 @@ const page = `<!doctype html>
         if (contact === 'missing-email' && clean(lead.email)) return false;
         if (contact === 'has-email' && !clean(lead.email)) return false;
         if (contact === 'phone-only' && (!clean(lead.phone) || clean(lead.email))) return false;
+        if (activeView === 'ready-text' && !readyToText(lead)) return false;
+        if (activeView === 'ready-email' && !readyToEmail(lead)) return false;
+        if (activeView === 'needs-website' && inferredWebsiteStatus(lead) === 'no_website') return false;
+        if (activeView === 'phone-unverified' && inferredPhoneStatus(lead) === 'verified') return false;
+        if (activeView === 'missing-owner' && inferredOwnerStatus(lead) === 'found') return false;
+        if (activeView === 'missing-email' && hasEmail(lead)) return false;
+        if (activeView === 'follow-up' && !needsFollowUp(lead)) return false;
+        if (activeView === 'replied' && lead.status !== 'replied') return false;
+        if (activeView === 'dead' && lead.status !== 'dead') return false;
         return true;
       });
     }
@@ -356,34 +541,59 @@ const page = `<!doctype html>
         ['New', counts.new || 0],
         ['Sent', counts.sent || 0],
         ['Dead', counts.dead || 0],
+        ['Ready Text', rows.filter(readyToText).length],
+        ['Ready Email', rows.filter(readyToEmail).length],
+        ['Need Site Check', rows.filter((lead) => inferredWebsiteStatus(lead) !== 'no_website' && lead.status !== 'dead').length],
+        ['Phone Unverified', rows.filter((lead) => inferredPhoneStatus(lead) !== 'verified').length],
         ['Missing Owner', missingOwner],
         ['Missing Email', missingEmail],
       ].map(([label, value]) => '<div class="stat"><strong>' + value + '</strong><span>' + label + '</span></div>').join('');
     }
+    function updateViewButtons() {
+      document.querySelectorAll('[data-view]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.view === activeView);
+      });
+    }
     function render() {
       const rows = filteredLeads();
+      updateViewButtons();
       renderStats(rows);
       document.getElementById('rows').innerHTML = rows.map((lead, index) => {
         const demo = clean(lead.demo_url);
         const social = clean(lead.social);
+        const websiteStatus = inferredWebsiteStatus(lead);
+        const phoneStatus = inferredPhoneStatus(lead);
+        const emailStatus = inferredEmailStatus(lead);
+        const ownerStatus = inferredOwnerStatus(lead);
+        const nextAction = inferredNextAction(lead);
         return '<tr data-key="' + esc(lead.key) + '">' +
           '<td>' + (index + 1) + '<div class="tiny">' + esc(lead.date_found) + '</div></td>' +
           '<td><strong>' + esc(lead.business) + '</strong><div class="tiny">Base: ' + esc(lead.base_status) + '</div></td>' +
+          '<td><span class="score">' + qualityScore(lead) + '</span></td>' +
           '<td><select class="status status-' + esc(lead.status) + '" data-field="status">' +
             ['new','sent','pending','replied','dead','live','in_progress'].map((s) => '<option value="' + s + '"' + (lead.status === s ? ' selected' : '') + '>' + s + '</option>').join('') +
           '</select></td>' +
-          '<td><input class="cell-input" data-field="contact_name" value="' + esc(clean(lead.contact_name)) + '" placeholder="Owner name"></td>' +
-          '<td><input class="cell-input" data-field="email" value="' + esc(clean(lead.email)) + '" placeholder="email"></td>' +
+          '<td><select data-field="website_status">' + ['needs_verify','no_website','unclear','has_website'].map((s) => '<option value="' + s + '"' + (websiteStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="wide-input" data-field="website_evidence" value="' + esc(clean(lead.website_evidence)) + '" placeholder="website proof / URL"></td>' +
+          '<td><select data-field="phone_status">' + ['unverified','verified','wrong','duplicate'].map((s) => '<option value="' + s + '"' + (phoneStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="phone_source" value="' + esc(clean(lead.phone_source)) + '" placeholder="phone source"></td>' +
+          '<td><input class="cell-input" data-field="contact_name" value="' + esc(clean(lead.contact_name)) + '" placeholder="Owner name"><br><select data-field="owner_status">' + ['missing','found','unclear'].map((s) => '<option value="' + s + '"' + (ownerStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="owner_source" value="' + esc(clean(lead.owner_source)) + '" placeholder="owner source"></td>' +
+          '<td><input class="cell-input" data-field="email" value="' + esc(clean(lead.email)) + '" placeholder="email"><br><select data-field="email_status">' + ['missing','found','unverified','bounced'].map((s) => '<option value="' + s + '"' + (emailStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="email_source" value="' + esc(clean(lead.email_source)) + '" placeholder="email source"></td>' +
           '<td>' + esc(clean(lead.phone) || '—') + '</td>' +
           '<td><input class="cell-input" data-field="social" value="' + esc(social) + '" placeholder="social URL"></td>' +
           '<td>' + esc(lead.category) + '</td>' +
           '<td>' + (demo ? '<a class="url" href="' + esc(demo) + '" target="_blank" rel="noopener">demo</a>' : 'TBD') + '</td>' +
-          '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea></td>' +
-          '<td>' +
+          '<td><select data-field="next_action">' + ['research_contact','verify_website','verify_phone','build_demo','send_sms','send_email','follow_up','do_not_contact'].map((s) => '<option value="' + s + '"' + (nextAction === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
+          '<td><input type="date" data-field="follow_up_date" value="' + esc(clean(lead.follow_up_date)) + '"><br><input type="date" data-field="last_verified" value="' + esc(clean(lead.last_verified)) + '" title="Last verified"></td>' +
+          '<td>' + researchLinks(lead) + '</td>' +
+          '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea><br><input class="wide-input" data-field="dead_reason" value="' + esc(clean(lead.dead_reason)) + '" placeholder="dead reason if applicable"></td>' +
+          '<td><div class="action-stack">' +
             (clean(lead.phone) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">SMS</button> ' : '') +
             (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Email</button> ' : '') +
+            (clean(lead.phone) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">SMS Sent</button> ' : '') +
+            (clean(lead.email) && demo ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Email Sent</button> ' : '') +
+            '<button class="quick-replied" data-action="replied" data-key="' + esc(lead.key) + '">Replied</button> ' +
+            '<button class="quick-dead" data-action="dead" data-key="' + esc(lead.key) + '">Dead</button> ' +
             '<button class="save-btn" data-save="' + esc(lead.key) + '">Save</button>' +
-          '</td>' +
+          '</div></td>' +
         '</tr>';
       }).join('');
     }
@@ -399,13 +609,69 @@ const page = `<!doctype html>
       render();
       showToast('Saved ' + lead.business);
     }
+    async function quickAction(button) {
+      const lead = leads.find((item) => item.key === button.dataset.key);
+      const action = button.dataset.action;
+      const payload = { key: lead.key, business: lead.business };
+
+      if (action === 'sms-sent') {
+        Object.assign(payload, {
+          status: 'sent',
+          outreach_method: 'sms',
+          outreach_date: todayIso(),
+          next_action: 'follow_up',
+          follow_up_date: lead.follow_up_date || '',
+          notes: (clean(lead.notes) || '') + '\\nSent SMS on ' + todayIso() + '.',
+        });
+      }
+      if (action === 'email-sent') {
+        Object.assign(payload, {
+          status: 'sent',
+          outreach_method: 'email',
+          outreach_date: todayIso(),
+          next_action: 'follow_up',
+          follow_up_date: lead.follow_up_date || '',
+          notes: (clean(lead.notes) || '') + '\\nSent email on ' + todayIso() + '.',
+        });
+      }
+      if (action === 'replied') {
+        Object.assign(payload, { status: 'replied', next_action: 'follow_up' });
+      }
+      if (action === 'dead') {
+        const reason = prompt('Why is this lead dead? If they have a website, paste the website/domain.');
+        if (!reason) return;
+        Object.assign(payload, {
+          status: 'dead',
+          website_status: reason.includes('.') ? 'has_website' : (lead.website_status || 'unclear'),
+          website_evidence: reason.includes('.') ? reason : (lead.website_evidence || ''),
+          dead_reason: reason,
+          next_action: 'do_not_contact',
+          notes: (clean(lead.notes) || '') + '\\nDead: ' + reason,
+        });
+      }
+
+      const result = await api('/api/lead', { method: 'POST', body: JSON.stringify(payload) });
+      Object.assign(lead, result.override);
+      render();
+      showToast('Updated ' + lead.business);
+    }
     document.addEventListener('click', (event) => {
       if (event.target.id === 'reload') load().catch((error) => showToast(error.message));
       if (event.target.dataset.save) saveRow(event.target).catch((error) => showToast(error.message));
-      if (event.target.dataset.copy) {
-        const lead = leads.find((item) => item.key === event.target.dataset.key);
-        const text = event.target.dataset.copy === 'sms' ? smsTemplate(lead) : emailTemplate(lead);
-        copyText(text, event.target.dataset.copy.toUpperCase()).catch((error) => showToast(error.message));
+      if (event.target.dataset.action) quickAction(event.target).catch((error) => showToast(error.message));
+      if (event.target.dataset.view !== undefined) {
+        activeView = event.target.dataset.view;
+        render();
+      }
+      const copyButton = event.target.closest('[data-copy]');
+      if (copyButton) {
+        const lead = leads.find((item) => item.key === copyButton.dataset.key);
+        if (!lead) {
+          showToast('Lead not found. Click Reload and try again.');
+          return;
+        }
+        const text = copyButton.dataset.copy === 'sms' ? smsTemplate(lead) : emailTemplate(lead);
+        copyText(text, copyButton.dataset.copy.toUpperCase()).catch((error) => showToast(error.message));
       }
     });
     document.getElementById('tokenForm').addEventListener('submit', (event) => {
