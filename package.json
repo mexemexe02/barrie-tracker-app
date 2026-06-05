@@ -1,0 +1,12 @@
+{
+  "name": "barrie-tracker-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Persistent admin tracker for Barrie Demo Drop leads.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
