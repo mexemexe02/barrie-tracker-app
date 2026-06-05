@@ -275,6 +275,9 @@ const page = `<!doctype html>
     table { width: 100%; border-collapse: collapse; min-width: 2300px; font-size: 0.82rem; }
     th, td { border-bottom: 1px solid #1f2330; padding: 8px; vertical-align: top; text-align: left; }
     th { color: #c9a84c; background: #171a25; position: sticky; top: 0; }
+    th:last-child, td:last-child { position: sticky; right: 0; min-width: 210px; max-width: 230px; box-shadow: -10px 0 16px rgba(15, 17, 23, 0.85); }
+    th:last-child { z-index: 4; background: #171a25; }
+    td:last-child { z-index: 2; background: #111520; border-left: 1px solid #2a2d3a; }
     .url { color: #70a7ff; word-break: break-all; }
     .tiny { color: #777; font-size: 0.72rem; }
     .status-new { color: #4ade80; }
@@ -285,7 +288,8 @@ const page = `<!doctype html>
     .cell-input { width: 150px; }
     .wide-input { width: 230px; }
     .notes { width: 280px; min-height: 44px; }
-    .action-stack { display: flex; gap: 4px; flex-wrap: wrap; min-width: 260px; }
+    .action-stack { display: flex; flex-direction: column; gap: 5px; min-width: 190px; }
+    .action-stack button { width: 100%; padding: 6px 8px; text-align: left; }
     .research-links a { display: inline-block; color: #70a7ff; margin: 0 6px 4px 0; text-decoration: none; }
     .score { color: #c9a84c; font-weight: 800; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #15351f; color: #7ee787; padding: 10px 18px; border-radius: 8px; opacity: 0; transition: opacity .2s; }
