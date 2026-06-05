@@ -172,6 +172,7 @@ function upsertOverride(payload) {
 
   [
     'contact_name',
+    'phone',
     'email',
     'social',
     'notes',
