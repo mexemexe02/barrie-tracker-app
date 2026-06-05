@@ -386,6 +386,9 @@ const page = `<!doctype html>
     function hasSocial(lead) {
       return Boolean(clean(lead.social));
     }
+    function hasOutreachRoute(lead) {
+      return hasEmail(lead) || hasSocial(lead) || (hasPhone(lead) && !isTollFreePhone(lead));
+    }
     function isOpenForOutreach(lead) {
       return !['dead', 'sent', 'replied', 'in_progress'].includes(lead.status);
     }
@@ -400,6 +403,7 @@ const page = `<!doctype html>
       const notes = String(lead.notes || '').toLowerCase();
       if (lead.status === 'dead' && (notes.includes('website') || notes.includes('domain'))) return 'has_website';
       if (notes.includes('verified no website') || notes.includes('no official website')) return 'no_website';
+      if (lead.status === 'live' || (hasDemo(lead) && notes.includes('demo deployed'))) return 'no_website';
       return 'needs_verify';
     }
     function inferredPhoneStatus(lead) {
@@ -439,7 +443,7 @@ const page = `<!doctype html>
     }
     function readyToReachOut(lead) {
       if (lead.status === 'ready') return true;
-      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && hasDemo(lead) && (readyToText(lead) || readyToEmail(lead) || hasSocial(lead));
+      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && hasDemo(lead) && hasOutreachRoute(lead);
     }
     function needsEmail(lead) {
       return isOpenForOutreach(lead) && hasDemo(lead) && !hasEmail(lead) && !isTextablePhone(lead);
