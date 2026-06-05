@@ -3,11 +3,17 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 
-const PORT = Number(process.env.PORT || 3000);
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+function envValue(name, fallback = '') {
+  const value = process.env[name];
+  if (!value) return fallback;
+  return value.replace(/^['"]|['"]$/g, '');
+}
+
+const PORT = Number(envValue('PORT', '3000'));
+const DATA_DIR = envValue('DATA_DIR', path.join(__dirname, 'data'));
 const STATE_PATH = path.join(DATA_DIR, 'tracker-state.json');
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
-const LEADS_CSV_URL = process.env.LEADS_CSV_URL || 'https://mexemexe02.github.io/barrie-lead-tracker/leads.csv';
+const ADMIN_TOKEN = envValue('ADMIN_TOKEN');
+const LEADS_CSV_URL = envValue('LEADS_CSV_URL', 'https://mexemexe02.github.io/barrie-lead-tracker/leads.csv');
 
 const STATUS_VALUES = new Set(['new', 'sent', 'pending', 'replied', 'dead', 'live', 'in_progress']);
 
