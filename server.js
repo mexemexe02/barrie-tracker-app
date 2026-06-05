@@ -201,6 +201,7 @@ const page = `<!doctype html>
     h1 { margin: 0 0 8px; color: #c9a84c; font-size: 1.35rem; }
     p { color: #999; margin: 0 0 18px; }
     .bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    .message { background: #1a1d2a; border: 1px solid #2a2d3a; border-radius: 8px; color: #d7c176; margin-bottom: 14px; padding: 10px 12px; }
     input, select, textarea, button { border: 1px solid #2a2d3a; border-radius: 6px; background: #161923; color: #eee; padding: 7px 9px; }
     button { cursor: pointer; background: #2a2413; color: #e4c66f; font-weight: 700; }
     button:hover { filter: brightness(1.15); }
@@ -227,9 +228,9 @@ const page = `<!doctype html>
 <body>
   <h1>Barrie Lead Admin Tracker</h1>
   <p>Persistent tracker backed by Coolify storage. No-website rule still applies: mark as dead if an official website is found.</p>
-  <div class="bar">
+  <form class="bar" id="tokenForm">
     <input id="token" type="password" placeholder="Admin token">
-    <button id="saveToken">Save token</button>
+    <button id="saveToken" type="submit">Save token</button>
     <input id="search" placeholder="Search business, phone, notes">
     <select id="statusFilter">
       <option value="">All statuses</option>
@@ -246,8 +247,9 @@ const page = `<!doctype html>
       <option value="has-email">Has email</option>
       <option value="phone-only">Phone only</option>
     </select>
-    <button id="reload">Reload</button>
-  </div>
+    <button id="reload" type="button">Reload</button>
+  </form>
+  <div id="message" class="message"></div>
   <div id="stats" class="stats"></div>
   <div class="wrap">
     <table>
@@ -264,9 +266,11 @@ const page = `<!doctype html>
   <script>
     let leads = [];
     const tokenInput = document.getElementById('token');
+    const message = document.getElementById('message');
     tokenInput.value = localStorage.getItem('barrie_admin_token') || '';
 
     function token() { return tokenInput.value.trim(); }
+    function setMessage(text) { message.textContent = text; }
     function showToast(message) {
       const toast = document.getElementById('toast');
       toast.textContent = message;
@@ -292,9 +296,16 @@ const page = `<!doctype html>
       return body;
     }
     async function load() {
+      if (!token()) {
+        leads = [];
+        render();
+        setMessage('Paste the admin token, then click Save token to load the tracker.');
+        return;
+      }
       const data = await api('/api/leads');
       leads = data.leads;
       render();
+      setMessage('Loaded ' + leads.length + ' leads. Manual edits here save to Coolify storage.');
       showToast('Loaded ' + leads.length + ' leads');
     }
     function filteredLeads() {
@@ -363,17 +374,25 @@ const page = `<!doctype html>
       showToast('Saved ' + lead.business);
     }
     document.addEventListener('click', (event) => {
-      if (event.target.id === 'saveToken') {
-        localStorage.setItem('barrie_admin_token', token());
-        showToast('Token saved');
-      }
       if (event.target.id === 'reload') load().catch((error) => showToast(error.message));
       if (event.target.dataset.save) saveRow(event.target).catch((error) => showToast(error.message));
+    });
+    document.getElementById('tokenForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      localStorage.setItem('barrie_admin_token', token());
+      showToast('Token saved');
+      load().catch((error) => {
+        setMessage(error.message);
+        showToast(error.message);
+      });
     });
     ['search', 'statusFilter', 'contactFilter'].forEach((id) => {
       document.getElementById(id).addEventListener('input', render);
     });
-    load().catch((error) => showToast(error.message));
+    load().catch((error) => {
+      setMessage(error.message);
+      showToast(error.message);
+    });
   </script>
 </body>
 </html>`;
