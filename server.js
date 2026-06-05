@@ -17,7 +17,7 @@ const LEADS_CSV_URL = envValue('LEADS_CSV_URL', 'https://mexemexe02.github.io/ba
 
 const STATUS_VALUES = new Set(['new', 'ready', 'sent', 'pending', 'replied', 'dead', 'live', 'in_progress']);
 const WEBSITE_STATUS_VALUES = new Set(['needs_verify', 'no_website', 'has_website', 'unclear']);
-const PHONE_STATUS_VALUES = new Set(['unverified', 'verified', 'wrong', 'duplicate']);
+const PHONE_STATUS_VALUES = new Set(['unverified', 'verified', 'not_textable', 'wrong', 'duplicate']);
 const EMAIL_STATUS_VALUES = new Set(['missing', 'found', 'unverified', 'bounced']);
 const OWNER_STATUS_VALUES = new Set(['missing', 'found', 'unclear']);
 
@@ -328,8 +328,9 @@ const page = `<!doctype html>
     <button type="button" data-view="ready-outreach">Ready Outreach</button>
     <button type="button" data-view="ready-text">Ready to Text</button>
     <button type="button" data-view="ready-email">Ready to Email</button>
+    <button type="button" data-view="needs-email">Needs Email</button>
     <button type="button" data-view="needs-website">Needs Website Verify</button>
-    <button type="button" data-view="phone-unverified">Phone Unverified</button>
+    <button type="button" data-view="phone-unverified">No Textable Phone</button>
     <button type="button" data-view="missing-owner">Missing Owner</button>
     <button type="button" data-view="missing-email">Missing Email</button>
     <button type="button" data-view="follow-up">Follow Up</button>
@@ -388,6 +389,12 @@ const page = `<!doctype html>
     function isOpenForOutreach(lead) {
       return !['dead', 'sent', 'replied', 'in_progress'].includes(lead.status);
     }
+    function normalizedPhone(lead) {
+      return String(lead.phone || '').replace(/\\D/g, '').replace(/^1/, '');
+    }
+    function isTollFreePhone(lead) {
+      return /^(800|833|844|855|866|877|888)/.test(normalizedPhone(lead));
+    }
     function inferredWebsiteStatus(lead) {
       if (lead.website_status) return lead.website_status;
       const notes = String(lead.notes || '').toLowerCase();
@@ -396,6 +403,7 @@ const page = `<!doctype html>
       return 'needs_verify';
     }
     function inferredPhoneStatus(lead) {
+      if (isTollFreePhone(lead)) return 'not_textable';
       return lead.phone_status || (hasPhone(lead) ? 'unverified' : 'wrong');
     }
     function inferredEmailStatus(lead) {
@@ -406,22 +414,25 @@ const page = `<!doctype html>
     }
     function outreachAction(lead) {
       if (hasEmail(lead)) return 'send_email';
-      if (inferredPhoneStatus(lead) === 'verified' && hasPhone(lead)) return 'send_sms';
+      if (isTextablePhone(lead)) return 'send_sms';
       if (hasSocial(lead)) return 'send_social';
-      return 'research_contact';
+      return 'find_email';
     }
     function inferredNextAction(lead) {
       if (lead.next_action) return lead.next_action;
       if (lead.status === 'dead') return 'do_not_contact';
       if (lead.status === 'ready') return outreachAction(lead);
       if (inferredWebsiteStatus(lead) !== 'no_website') return 'verify_website';
-      if (inferredPhoneStatus(lead) !== 'verified') return 'verify_phone';
+      if (inferredPhoneStatus(lead) !== 'verified') return hasEmail(lead) ? 'send_email' : 'find_email';
       if (!hasDemo(lead)) return 'build_demo';
       if (lead.status === 'sent' || lead.status === 'replied') return 'follow_up';
-      return hasPhone(lead) ? 'send_sms' : 'research_contact';
+      return isTextablePhone(lead) ? 'send_sms' : 'find_email';
+    }
+    function isTextablePhone(lead) {
+      return inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && !isTollFreePhone(lead);
     }
     function readyToText(lead) {
-      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && hasDemo(lead);
+      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && isTextablePhone(lead) && hasDemo(lead);
     }
     function readyToEmail(lead) {
       return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && inferredEmailStatus(lead) !== 'bounced' && hasEmail(lead) && hasDemo(lead);
@@ -429,6 +440,9 @@ const page = `<!doctype html>
     function readyToReachOut(lead) {
       if (lead.status === 'ready') return true;
       return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && hasDemo(lead) && (readyToText(lead) || readyToEmail(lead) || hasSocial(lead));
+    }
+    function needsEmail(lead) {
+      return isOpenForOutreach(lead) && hasDemo(lead) && !hasEmail(lead) && !isTextablePhone(lead);
     }
     function needsFollowUp(lead) {
       return lead.status === 'sent' || inferredNextAction(lead) === 'follow_up';
@@ -544,6 +558,7 @@ const page = `<!doctype html>
         if (activeView === 'ready-outreach' && !readyToReachOut(lead)) return false;
         if (activeView === 'ready-text' && !readyToText(lead)) return false;
         if (activeView === 'ready-email' && !readyToEmail(lead)) return false;
+        if (activeView === 'needs-email' && !needsEmail(lead)) return false;
         if (activeView === 'needs-website' && inferredWebsiteStatus(lead) === 'no_website') return false;
         if (activeView === 'phone-unverified' && inferredPhoneStatus(lead) === 'verified') return false;
         if (activeView === 'missing-owner' && inferredOwnerStatus(lead) === 'found') return false;
@@ -569,8 +584,9 @@ const page = `<!doctype html>
         ['Dead', counts.dead || 0],
         ['Ready Text', rows.filter(readyToText).length],
         ['Ready Email', rows.filter(readyToEmail).length],
+        ['Needs Email', rows.filter(needsEmail).length],
         ['Need Site Check', rows.filter((lead) => inferredWebsiteStatus(lead) !== 'no_website' && lead.status !== 'dead').length],
-        ['Phone Unverified', rows.filter((lead) => inferredPhoneStatus(lead) !== 'verified').length],
+        ['No Textable Phone', rows.filter((lead) => inferredPhoneStatus(lead) !== 'verified' || isTollFreePhone(lead)).length],
         ['Missing Owner', missingOwner],
         ['Missing Email', missingEmail],
       ].map(([label, value]) => '<div class="stat"><strong>' + value + '</strong><span>' + label + '</span></div>').join('');
@@ -600,23 +616,23 @@ const page = `<!doctype html>
             ['new','ready','sent','pending','replied','dead','live','in_progress'].map((s) => '<option value="' + s + '"' + (lead.status === s ? ' selected' : '') + '>' + s + '</option>').join('') +
           '</select></td>' +
           '<td><select data-field="website_status">' + ['needs_verify','no_website','unclear','has_website'].map((s) => '<option value="' + s + '"' + (websiteStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="wide-input" data-field="website_evidence" value="' + esc(clean(lead.website_evidence)) + '" placeholder="website proof / URL"></td>' +
-          '<td><select data-field="phone_status">' + ['unverified','verified','wrong','duplicate'].map((s) => '<option value="' + s + '"' + (phoneStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="phone_source" value="' + esc(clean(lead.phone_source)) + '" placeholder="phone source"></td>' +
+          '<td><select data-field="phone_status">' + ['unverified','verified','not_textable','wrong','duplicate'].map((s) => '<option value="' + s + '"' + (phoneStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="phone_source" value="' + esc(clean(lead.phone_source)) + '" placeholder="phone source"></td>' +
           '<td><input class="cell-input" data-field="contact_name" value="' + esc(clean(lead.contact_name)) + '" placeholder="Owner name"><br><select data-field="owner_status">' + ['missing','found','unclear'].map((s) => '<option value="' + s + '"' + (ownerStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="owner_source" value="' + esc(clean(lead.owner_source)) + '" placeholder="owner source"></td>' +
           '<td><input class="cell-input" data-field="email" value="' + esc(clean(lead.email)) + '" placeholder="email"><br><select data-field="email_status">' + ['missing','found','unverified','bounced'].map((s) => '<option value="' + s + '"' + (emailStatus === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><br><input class="cell-input" data-field="email_source" value="' + esc(clean(lead.email_source)) + '" placeholder="email source"></td>' +
           '<td>' + esc(clean(lead.phone) || '—') + '</td>' +
           '<td><input class="cell-input" data-field="social" value="' + esc(social) + '" placeholder="social URL"></td>' +
           '<td>' + esc(lead.category) + '</td>' +
           '<td>' + (demo ? '<a class="url" href="' + esc(demo) + '" target="_blank" rel="noopener">demo</a>' : 'TBD') + '</td>' +
-          '<td><select data-field="next_action">' + ['research_contact','verify_website','verify_phone','build_demo','send_sms','send_email','send_social','follow_up','do_not_contact'].map((s) => '<option value="' + s + '"' + (nextAction === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
+          '<td><select data-field="next_action">' + ['research_contact','find_email','verify_website','verify_phone','build_demo','send_sms','send_email','send_social','follow_up','do_not_contact'].map((s) => '<option value="' + s + '"' + (nextAction === s ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
           '<td><input type="date" data-field="follow_up_date" value="' + esc(clean(lead.follow_up_date)) + '"><br><input type="date" data-field="last_verified" value="' + esc(clean(lead.last_verified)) + '" title="Last verified"></td>' +
           '<td>' + researchLinks(lead) + '</td>' +
           '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea><br><input class="wide-input" data-field="dead_reason" value="' + esc(clean(lead.dead_reason)) + '" placeholder="dead reason if applicable"></td>' +
           '<td><div class="action-stack">' +
-            (clean(lead.phone) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">Copy SMS</button> ' : '') +
+            (isTextablePhone(lead) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">Copy SMS</button> ' : '') +
             (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Copy Email</button> ' : '') +
-            (clean(lead.phone) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">Mark SMS Sent</button> ' : '') +
+            (isTextablePhone(lead) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">Mark SMS Sent</button> ' : '') +
             (clean(lead.email) && demo ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Mark Email Sent</button> ' : '') +
-            (demo && isOpenForOutreach(lead) ? '<button class="save-btn" data-action="ready" data-key="' + esc(lead.key) + '">Mark Ready</button> ' : '') +
+            (demo && readyToReachOut(lead) ? '<button class="save-btn" data-action="ready" data-key="' + esc(lead.key) + '">Mark Ready</button> ' : '') +
             '<button class="quick-replied" data-action="replied" data-key="' + esc(lead.key) + '">Replied</button> ' +
             '<button class="quick-dead" data-action="dead" data-key="' + esc(lead.key) + '">Dead</button> ' +
             '<button class="save-btn" data-save="' + esc(lead.key) + '">Save</button>' +
