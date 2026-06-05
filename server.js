@@ -586,10 +586,10 @@ const page = `<!doctype html>
           '<td>' + researchLinks(lead) + '</td>' +
           '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea><br><input class="wide-input" data-field="dead_reason" value="' + esc(clean(lead.dead_reason)) + '" placeholder="dead reason if applicable"></td>' +
           '<td><div class="action-stack">' +
-            (clean(lead.phone) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">SMS</button> ' : '') +
-            (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Email</button> ' : '') +
-            (clean(lead.phone) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">SMS Sent</button> ' : '') +
-            (clean(lead.email) && demo ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Email Sent</button> ' : '') +
+            (clean(lead.phone) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">Copy SMS</button> ' : '') +
+            (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Copy Email</button> ' : '') +
+            (clean(lead.phone) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">Mark SMS Sent</button> ' : '') +
+            (clean(lead.email) && demo ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Mark Email Sent</button> ' : '') +
             '<button class="quick-replied" data-action="replied" data-key="' + esc(lead.key) + '">Replied</button> ' +
             '<button class="quick-dead" data-action="dead" data-key="' + esc(lead.key) + '">Dead</button> ' +
             '<button class="save-btn" data-save="' + esc(lead.key) + '">Save</button>' +
