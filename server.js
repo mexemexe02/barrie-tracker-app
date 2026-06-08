@@ -394,6 +394,12 @@ const page = `<!doctype html>
     function isOpenForOutreach(lead) {
       return !['dead', 'sent', 'replied', 'in_progress'].includes(lead.status);
     }
+    function alreadyContacted(lead) {
+      if (['sent', 'replied', 'dead', 'in_progress'].includes(lead.status)) return true;
+      if (clean(lead.outreach_date) !== '—') return true;
+      if (clean(lead.outreach_method) !== '—') return true;
+      return false;
+    }
     function normalizedPhone(lead) {
       return String(lead.phone || '').replace(/\\D/g, '').replace(/^1/, '');
     }
@@ -438,12 +444,15 @@ const page = `<!doctype html>
       return inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && !isTollFreePhone(lead);
     }
     function readyToText(lead) {
+      if (alreadyContacted(lead)) return false;
       return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && isTextablePhone(lead) && hasDemo(lead);
     }
     function readyToEmail(lead) {
+      if (alreadyContacted(lead)) return false;
       return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && inferredEmailStatus(lead) !== 'bounced' && hasEmail(lead) && hasDemo(lead);
     }
     function readyToReachOut(lead) {
+      if (alreadyContacted(lead)) return false;
       if (lead.status === 'ready') return true;
       return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && hasDemo(lead) && hasOutreachRoute(lead);
     }
