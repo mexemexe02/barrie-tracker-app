@@ -326,7 +326,7 @@ const page = `<!doctype html>
   <div id="message" class="message"></div>
   <div class="view-buttons" id="viewButtons">
     <button type="button" data-view="">All</button>
-    <button type="button" data-view="ready-outreach">Ready Outreach</button>
+    <button type="button" data-view="ready-outreach" class="active">Ready Outreach</button>
     <button type="button" data-view="ready-text">Ready to Text</button>
     <button type="button" data-view="ready-email">Ready to Email</button>
     <button type="button" data-view="needs-email">Needs Email</button>
@@ -354,7 +354,8 @@ const page = `<!doctype html>
   <div id="toast" class="toast"></div>
   <script>
     let leads = [];
-    let activeView = '';
+    // Default view: Ready Outreach (Humberto's main workflow on Coolify tracker).
+    let activeView = 'ready-outreach';
     const tokenInput = document.getElementById('token');
     const message = document.getElementById('message');
     tokenInput.value = localStorage.getItem('barrie_admin_token') || '';
@@ -488,7 +489,9 @@ const page = `<!doctype html>
     }
     function smsTemplate(lead) {
       const demo = clean(lead.demo_url);
-      return greeting(lead.contact_name) + " I'm Humberto. I run Kumon Mapleview here in Barrie, and I also build websites for local businesses. I noticed " + lead.business + " does not have a website yet, so I put together a quick demo: " + shortUrl(demo) + ". If you are interested, I can build you a proper professional site. Worth a look?";
+      const name = firstName(lead.contact_name);
+      const greet = name ? 'Hi ' + name + ' —' : 'Hi —';
+      return greet + " I'm Humberto, local to Barrie (Kumon Mapleview). I noticed " + lead.business + " doesn't have a website yet, and I put together a quick demo: " + demo + "\\n\\nLet me know what you think if you're interested.";
     }
     function emailTemplate(lead) {
       const demo = clean(lead.demo_url);
