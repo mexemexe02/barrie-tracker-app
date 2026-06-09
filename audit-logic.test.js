@@ -10,6 +10,11 @@ const {
   canUsePhoneForOutreach,
 } = require('./lead-logic');
 
+const dockerfile = fs.readFileSync(path.join(__dirname, 'Dockerfile'), 'utf8');
+for (const file of ['server.js', 'lead-logic.js']) {
+  assert.match(dockerfile, new RegExp(file), `Dockerfile must COPY ${file}`);
+}
+
 function parseCsv(text) {
   const rows = [];
   let row = [];
