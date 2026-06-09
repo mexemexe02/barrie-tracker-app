@@ -719,26 +719,37 @@ ${clientLeadLogic()}
 </body>
 </html>`;
 
+function requestPath(req) {
+  const raw = (req.url || '/').split('?')[0] || '/';
+  return raw.endsWith('/') && raw.length > 1 ? raw.slice(0, -1) : raw;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && req.url === '/') {
+    const path = requestPath(req);
+
+    if ((req.method === 'GET' || req.method === 'HEAD') && path === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(page);
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        res.end(page);
+      }
       return;
     }
 
-    if (req.method === 'GET' && req.url === '/health') {
+    if (req.method === 'GET' && path === '/health') {
       sendJson(res, 200, { ok: true });
       return;
     }
 
-    if (req.method === 'GET' && req.url === '/api/leads') {
+    if (req.method === 'GET' && path === '/api/leads') {
       if (!requireAuth(req, res)) return;
       sendJson(res, 200, { leads: await loadLeads() });
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/api/lead') {
+    if (req.method === 'POST' && path === '/api/lead') {
       if (!requireAuth(req, res)) return;
       const payload = JSON.parse(await readBody(req));
       sendJson(res, 200, upsertOverride(payload));
