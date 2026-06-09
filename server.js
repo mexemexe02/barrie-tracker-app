@@ -590,24 +590,25 @@ const page = `<!doctype html>
         return true;
       });
     }
-    function renderStats(rows) {
-      const counts = rows.reduce((acc, lead) => {
+    function renderStats(allLeads, shownCount) {
+      const counts = allLeads.reduce((acc, lead) => {
         acc[lead.status] = (acc[lead.status] || 0) + 1;
         return acc;
       }, {});
-      const missingOwner = rows.filter((lead) => !clean(lead.contact_name)).length;
-      const missingEmail = rows.filter((lead) => !clean(lead.email)).length;
+      const missingOwner = allLeads.filter((lead) => !clean(lead.contact_name)).length;
+      const missingEmail = allLeads.filter((lead) => !clean(lead.email)).length;
       document.getElementById('stats').innerHTML = [
-        ['Shown', rows.length],
+        ['Shown', shownCount + ' / ' + allLeads.length],
         ['New', counts.new || 0],
-        ['Ready Outreach', rows.filter(readyToReachOut).length],
+        ['Ready Outreach', allLeads.filter(readyToReachOut).length],
         ['Sent', counts.sent || 0],
+        ['Replied', counts.replied || 0],
         ['Dead', counts.dead || 0],
-        ['Ready Text', rows.filter(readyToText).length],
-        ['Ready Email', rows.filter(readyToEmail).length],
-        ['Needs Email', rows.filter(needsEmail).length],
-        ['Need Site Check', rows.filter((lead) => inferredWebsiteStatus(lead) !== 'no_website' && lead.status !== 'dead').length],
-        ['No Textable Phone', rows.filter((lead) => inferredPhoneStatus(lead) !== 'verified' || isTollFreePhone(lead)).length],
+        ['Ready Text', allLeads.filter(readyToText).length],
+        ['Ready Email', allLeads.filter(readyToEmail).length],
+        ['Follow-up', allLeads.filter(needsFollowUp).length],
+        ['Needs Email', allLeads.filter(needsEmail).length],
+        ['Need Site Check', allLeads.filter((lead) => inferredWebsiteStatus(lead) !== 'no_website' && lead.status !== 'dead').length],
         ['Missing Owner', missingOwner],
         ['Missing Email', missingEmail],
       ].map(([label, value]) => '<div class="stat"><strong>' + value + '</strong><span>' + label + '</span></div>').join('');
@@ -620,7 +621,7 @@ const page = `<!doctype html>
     function render() {
       const rows = filteredLeads();
       updateViewButtons();
-      renderStats(rows);
+      renderStats(leads, rows.length);
       document.getElementById('rows').innerHTML = rows.map((lead, index) => {
         const demo = clean(lead.demo_url);
         const social = clean(lead.social);
