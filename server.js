@@ -396,8 +396,8 @@ const page = `<!doctype html>
     }
     function alreadyContacted(lead) {
       if (['sent', 'replied', 'dead', 'in_progress'].includes(lead.status)) return true;
-      if (clean(lead.outreach_date) !== '—') return true;
-      if (clean(lead.outreach_method) !== '—') return true;
+      if (clean(lead.outreach_date)) return true;
+      if (clean(lead.outreach_method)) return true;
       return false;
     }
     function normalizedPhone(lead) {
