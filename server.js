@@ -2,6 +2,13 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const path = require('path');
+const { mergeLead } = require('./lead-logic');
+
+function clientLeadLogic() {
+  return fs
+    .readFileSync(path.join(__dirname, 'lead-logic.js'), 'utf8')
+    .replace(/\nmodule\.exports[\s\S]*$/, '\n');
+}
 
 function envValue(name, fallback = '') {
   const value = process.env[name];
@@ -112,21 +119,13 @@ function fetchText(url) {
 }
 
 async function loadLeads() {
-  const csv = await fetchText(LEADS_CSV_URL);
+  const cacheBust = LEADS_CSV_URL.includes('?') ? '&' : '?';
+  const csv = await fetchText(`${LEADS_CSV_URL}${cacheBust}t=${Date.now()}`);
   const state = loadState();
 
   return parseCsv(csv).map((lead) => {
-    const key = businessKey(lead.business);
-    const override = state.overrides[key] || {};
-
-    return {
-      ...lead,
-      ...override,
-      business: lead.business,
-      key,
-      base_status: lead.status || 'new',
-      status: override.status || lead.status || 'new',
-    };
+    const override = state.overrides[businessKey(lead.business)] || {};
+    return mergeLead(lead, override);
   });
 }
 
@@ -310,6 +309,7 @@ const page = `<!doctype html>
       <option value="new">new</option>
       <option value="ready">ready</option>
       <option value="sent">sent</option>
+      <option value="replied">replied</option>
       <option value="dead">dead</option>
       <option value="pending">pending</option>
       <option value="live">live</option>
@@ -353,6 +353,9 @@ const page = `<!doctype html>
   </div>
   <div id="toast" class="toast"></div>
   <script>
+${clientLeadLogic()}
+  </script>
+  <script>
     let leads = [];
     // Default view: Ready Outreach (Humberto's main workflow on Coolify tracker).
     let activeView = 'ready-outreach';
@@ -376,48 +379,6 @@ const page = `<!doctype html>
     function todayIso() {
       return new Date().toISOString().slice(0, 10);
     }
-    function hasDemo(lead) {
-      return Boolean(clean(lead.demo_url)) && !String(lead.demo_url).includes('TBD');
-    }
-    function hasPhone(lead) {
-      return Boolean(clean(lead.phone));
-    }
-    function hasEmail(lead) {
-      return Boolean(clean(lead.email));
-    }
-    function hasSocial(lead) {
-      return Boolean(clean(lead.social));
-    }
-    function hasOutreachRoute(lead) {
-      return hasEmail(lead) || hasSocial(lead) || (hasPhone(lead) && !isTollFreePhone(lead));
-    }
-    function isOpenForOutreach(lead) {
-      return !['dead', 'sent', 'replied', 'in_progress'].includes(lead.status);
-    }
-    function alreadyContacted(lead) {
-      if (['sent', 'replied', 'dead', 'in_progress'].includes(lead.status)) return true;
-      if (clean(lead.outreach_date)) return true;
-      if (clean(lead.outreach_method)) return true;
-      return false;
-    }
-    function normalizedPhone(lead) {
-      return String(lead.phone || '').replace(/\\D/g, '').replace(/^1/, '');
-    }
-    function isTollFreePhone(lead) {
-      return /^(800|833|844|855|866|877|888)/.test(normalizedPhone(lead));
-    }
-    function inferredWebsiteStatus(lead) {
-      if (lead.website_status) return lead.website_status;
-      const notes = String(lead.notes || '').toLowerCase();
-      if (lead.status === 'dead' && (notes.includes('website') || notes.includes('domain'))) return 'has_website';
-      if (notes.includes('verified no website') || notes.includes('no official website')) return 'no_website';
-      if (lead.status === 'live' || (hasDemo(lead) && notes.includes('demo deployed'))) return 'no_website';
-      return 'needs_verify';
-    }
-    function inferredPhoneStatus(lead) {
-      if (isTollFreePhone(lead)) return 'not_textable';
-      return lead.phone_status || (hasPhone(lead) ? 'unverified' : 'wrong');
-    }
     function inferredEmailStatus(lead) {
       return lead.email_status || (hasEmail(lead) ? 'found' : 'missing');
     }
@@ -438,29 +399,10 @@ const page = `<!doctype html>
       if (inferredPhoneStatus(lead) !== 'verified') return hasEmail(lead) ? 'send_email' : 'find_email';
       if (!hasDemo(lead)) return 'build_demo';
       if (lead.status === 'sent' || lead.status === 'replied') return 'follow_up';
-      return isTextablePhone(lead) ? 'send_sms' : 'find_email';
-    }
-    function isTextablePhone(lead) {
-      return inferredPhoneStatus(lead) === 'verified' && hasPhone(lead) && !isTollFreePhone(lead);
-    }
-    function readyToText(lead) {
-      if (alreadyContacted(lead)) return false;
-      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && isTextablePhone(lead) && hasDemo(lead);
-    }
-    function readyToEmail(lead) {
-      if (alreadyContacted(lead)) return false;
-      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && inferredEmailStatus(lead) !== 'bounced' && hasEmail(lead) && hasDemo(lead);
-    }
-    function readyToReachOut(lead) {
-      if (alreadyContacted(lead)) return false;
-      if (lead.status === 'ready') return true;
-      return isOpenForOutreach(lead) && inferredWebsiteStatus(lead) === 'no_website' && hasDemo(lead) && hasOutreachRoute(lead);
+      return canUsePhoneForOutreach(lead) ? 'send_sms' : 'find_email';
     }
     function needsEmail(lead) {
       return isOpenForOutreach(lead) && hasDemo(lead) && !hasEmail(lead) && !isTextablePhone(lead);
-    }
-    function needsFollowUp(lead) {
-      return lead.status === 'sent' || inferredNextAction(lead) === 'follow_up';
     }
     function qualityScore(lead) {
       let score = 0;
@@ -650,10 +592,11 @@ const page = `<!doctype html>
           '<td>' + researchLinks(lead) + '</td>' +
           '<td><textarea class="notes" data-field="notes" placeholder="verification/contact notes">' + esc(clean(lead.notes)) + '</textarea><br><input class="wide-input" data-field="dead_reason" value="' + esc(clean(lead.dead_reason)) + '" placeholder="dead reason if applicable"></td>' +
           '<td><div class="action-stack">' +
-            (isTextablePhone(lead) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">Copy SMS</button> ' : '') +
-            (clean(lead.email) && demo ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Copy Email</button> ' : '') +
-            (isTextablePhone(lead) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">Mark SMS Sent</button> ' : '') +
-            (clean(lead.email) && demo ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Mark Email Sent</button> ' : '') +
+            (canUsePhoneForOutreach(lead) && demo ? '<button class="copy-sms" data-copy="sms" data-key="' + esc(lead.key) + '">Copy SMS</button> ' : '') +
+            (clean(lead.email) && demo && !alreadyContacted(lead) ? '<button class="copy-email" data-copy="email" data-key="' + esc(lead.key) + '">Copy Email</button> ' : '') +
+            (canUsePhoneForOutreach(lead) && demo ? '<button class="quick-sent" data-action="sms-sent" data-key="' + esc(lead.key) + '">Mark SMS Sent</button> ' : '') +
+            (clean(lead.email) && demo && !alreadyContacted(lead) ? '<button class="quick-sent" data-action="email-sent" data-key="' + esc(lead.key) + '">Mark Email Sent</button> ' : '') +
+            (hasSocial(lead) && demo && !alreadyContacted(lead) ? '<button class="quick-sent" data-action="fb-sent" data-key="' + esc(lead.key) + '">Mark FB Sent</button> ' : '') +
             (demo && readyToReachOut(lead) ? '<button class="save-btn" data-action="ready" data-key="' + esc(lead.key) + '">Mark Ready</button> ' : '') +
             '<button class="quick-replied" data-action="replied" data-key="' + esc(lead.key) + '">Replied</button> ' +
             '<button class="quick-dead" data-action="dead" data-key="' + esc(lead.key) + '">Dead</button> ' +
@@ -697,6 +640,16 @@ const page = `<!doctype html>
           next_action: 'follow_up',
           follow_up_date: lead.follow_up_date || '',
           notes: (clean(lead.notes) || '') + '\\nSent email on ' + todayIso() + '.',
+        });
+      }
+      if (action === 'fb-sent') {
+        Object.assign(payload, {
+          status: 'sent',
+          outreach_method: 'fb_dm',
+          outreach_date: todayIso(),
+          next_action: 'follow_up',
+          follow_up_date: lead.follow_up_date || '',
+          notes: (clean(lead.notes) || '') + '\\nSent Facebook DM on ' + todayIso() + '.',
         });
       }
       if (action === 'replied') {
